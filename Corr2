@@ -1,0 +1,114 @@
+function out = CorrC2G(in, r)
+
+% Color to Gray Conversion by Correlation", IEEE Signal Processing Letters, vol. 24, no. 11, pp. 1651-1655, 2017.
+
+if ~exist('r', 'var')
+    r = 256;
+end
+
+[n, m, ~] = size(in);
+f = r / min(n, m);
+f = min(f, 1);
+
+if f < 1
+    in01 = im2double( imresize(in, f, 'nearest') );
+else
+    in01 = im2double( in );
+end
+
+Mu = mean(in01, 3); % Mean image
+
+x = bsxfun(@minus, in01, Mu);
+Sigma = sqrt( sum(abs(x) .^ 2, 3) ./ 2 ) ./ 0.5774; % standard deviation image (std([0 0 1]) ~= 0.5774)
+
+Q = Mu .* Sigma; % First contrast map
+
+% inline code to compute Pearson's correlations Rho1 and Rho2
+m0 = mean2(Q);
+mr = mean2(in01(:, :, 1));
+mg = mean2(in01(:, :, 2));
+mb = mean2(in01(:, :, 3));
+
+d1 = Q(:) - m0;
+dr = in01(:, :, 1) - mr;
+dg = in01(:, :, 2) - mg;
+db = in01(:, :, 3) - mb;
+
+sumd1 = sum(d1 .^ 2);
+sumr = sum(dr(:) .^ 2);
+sumg = sum(dg(:) .^ 2);
+sumb = sum(db(:) .^ 2);
+
+Rho1 = [sum(d1 .* dr(:)) ./ ( sumd1 * sumr ) ^ 0.5  ... 
+    sum(d1 .* dg(:)) ./ ( sumd1 * sumg ) ^ 0.5  ... 
+    sum(d1 .* db(:)) ./ ( sumd1 * sumb ) ^ 0.5];
+
+Q = Mu .* (1 - Sigma); % Second contrast map
+
+m0 = mean2(Q);
+
+d1 = Q(:) - m0;
+
+sumd1 = sum(d1 .^ 2);
+
+Rho2 = [sum(d1 .* dr(:)) ./ ( sumd1 * sumr ) ^ 0.5  ... 
+    sum(d1 .* dg(:)) ./ ( sumd1 * sumg ) ^ 0.5  ... 
+    sum(d1 .* db(:)) ./ ( sumd1 * sumb ) ^ 0.5];
+
+
+%% method #1
+Gamma1 = ( Rho1 - min(Rho1) ) ./ ( max(Rho1) - min(Rho1) ) - 0.5;
+beta1 = abs(Rho1);
+beta1 = beta1 ./ sum(beta1);
+lambda1 = beta1 + min(beta1, Gamma1);
+lambda1 = abs(lambda1);
+lambda1 = lambda1 ./ sum(lambda1);
+
+Gamma2 = ( Rho2 - min(Rho2) ) ./ ( max(Rho2) - min(Rho2) ) - 0.5;
+beta2 = abs(Rho2);
+beta2 = beta2 ./ sum(beta2);
+lambda2 = beta2 + min(beta2, Gamma2);
+lambda2 = abs(lambda2);
+lambda2 = lambda2 ./ sum(lambda2);
+
+out1 = mat2gray( in01(:, :, 1) .* lambda1(1) + in01(:, :, 2) .* lambda1(2) + in01(:, :, 3) .* lambda1(3) );
+out2 = mat2gray( in01(:, :, 1) .* lambda2(1) + in01(:, :, 2) .* lambda2(2) + in01(:, :, 3) .* lambda2(3) );
+
+index = Sigma ~= 0;
+
+[a1, ~] = imhist(out1(index), 11);
+[a2, ~] = imhist(out2(index), 11);
+
+k1 = sum(sum(a1(3 : 9) > a2(3 : 9) * 1.05));
+k2 = sum(sum(a2(3 : 9) > a1(3 : 9) * 1.05));
+
+% Apply lambda1 or lambda2 based on the fast histogram analysis (one may prefer
+% to use E-score or C2G-SSIM at the cost of speed reduction)
+if k1 >= k2 || ( sum(a1(3 : 9)) * k1 ) > ( sum(a2(3 : 9)) * 1.5 * k2 )
+    if f == 1
+        out = im2uint8(out1);
+    else
+        % Apply weighting parameters
+        out1 = imlincomb( lambda1(1), in(:,:,1) , lambda1(2), in(:,:,2) , lambda1(3), in(:,:,3), 'double' );
+        % mat2gray:
+        limits = [min(out1(:)) max(out1(:))];
+        if limits(2) ~= limits(1)
+            delta = 1 / (limits(2) -  limits(1));
+            out1 = imlincomb(delta, out1, -limits(1) * delta, 'double');
+        end
+        out = im2uint8(out1); % gray output
+    end
+elseif f == 1
+    out = im2uint8(out2);
+else
+    % Apply weighting parameters
+    out2 = imlincomb( lambda2(1), in(:,:,1) , lambda2(2), in(:,:,2) , lambda2(3), in(:,:,3), 'double' );
+    % mat2gray:
+    limits = [min(out2(:)) max(out2(:))];
+    if limits(2) ~= limits(1)
+        delta = 1 / (limits(2) -  limits(1));
+        out2 = imlincomb(delta, out2, -limits(1) * delta, 'double');
+    end
+    out = im2uint8(out2); % gray output
+end
+end
